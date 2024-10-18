@@ -25,7 +25,7 @@ turn_command = "STAY"
 
 # Define the actions for each key
 actions = {
-    'q': lambda: toggle_movement_mode(),
+    'e': lambda: toggle_movement_mode(),
     'w': lambda: increase_speed(),
     's': lambda: decrease_speed(),
     'h': lambda: reset_speed(),
@@ -85,7 +85,6 @@ async def handle_client(websocket, path):
                     # Decode the JPEG image
                     image = Image.open(io.BytesIO(message)) # Convert JPEG binary data to a PIL Image
                     img_array = np.array(image)
-                    print(f"Image shape: {img_array.shape}")
                     
                     # Inference
                     results = model.track(img_array, persist=True, conf=CONF_THRESHOLD, classes=CLASS_TRACKED)
@@ -124,7 +123,7 @@ async def handle_client(websocket, path):
                                 points = np.hstack(track).astype(np.int32).reshape((-1, 1, 2))
                                 cv2.polylines(annotated_frame, [points], isClosed=False, color=(230, 230, 230), thickness=10)
                             else:
-                                print("Low Nose Confidence")
+                                print(f"track_{track_id}, Low Nose Confidence")
                     else:
                         print("No tracked objects")
 
@@ -154,8 +153,9 @@ async def handle_client(websocket, path):
 
                     # Send Movement command
                     print(f"movement_mode: {movement_mode}, movespeed: {movespeed}, turn_command: {turn_command}")
-                    await websocket.send(turn_command)
-                    print(f"Sent command to ESP32: {turn_command}")
+                    movement_command = str(movespeed) + turn_command
+                    await websocket.send(movement_command)
+                    print(f"Sent command to ESP32: {movement_command}")
 
                 except Exception as e:
                     print(f"Error decoding image: {e}")
