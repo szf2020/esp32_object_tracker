@@ -18,7 +18,7 @@
 
 const char* ssid     = "bruhmoment";     // input your wifi name
 const char* password = "D0gshit!";   // input your wifi passwords
-const char* server_ip = "192.168.86.198"; // input your laptop IP
+const char* server_ip = "192.168.235.198"; // input your laptop IP
 const int port = 8765; // input port used
 
 void setupLedFlash(int pin);
@@ -183,5 +183,5 @@ void loop() {
     Serial.println("Camera capture failed");
   }
 
-  delay(1); // delay in milliseconds
+  delay(50); // delay in milliseconds
 }
