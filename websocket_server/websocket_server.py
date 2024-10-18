@@ -10,47 +10,95 @@ import cv2
 from collections import defaultdict
 from ultralytics import YOLO
 
-# Function to handle client messages
+
+## Params
+CLASS_TRACKED = 0  # 0 is the class ID for human
+CONF_THRESHOLD = 0.65  # Confidence threshold
+
+model = YOLO("yolov8x.pt") # n,s,m,l,x
+
 async def handle_client(websocket, path):
     client_ip = websocket.remote_address[0]
     print(f"Client connected: {client_ip}")
 
-    fig, ax = plt.subplots()  # Create the figure and axes once
-    img_display = None  # To hold the image display object
+    track_history = defaultdict(lambda: [])
 
     try:
         async for message in websocket:
-            # Check if the message is binary (image data)
             if isinstance(message, bytes):
                 print("Received image data from ESP32")
 
                 try:
-                    
+                    # Decode the JPEG image
                     image = Image.open(io.BytesIO(message)) # Convert JPEG binary data to a PIL Image
-                    img_array = np.array(image) # Convert the PIL Image to a NumPy array
+                    img_array = np.array(image)
+                    
+                    # Inference
+                    results = model.track(img_array, persist=True)
+                    
+                    # Detection Bounding Box Annotation
+                    annotated_frame = results[0].plot() # Visualize the results on the frame (Everything)
 
-                    if img_display is None:
-                        img_display = ax.imshow(img_array)
+                    # Selected Tracked Object Track Line
+                    track_ids = results[0].boxes.id
+                    boxes = results[0].boxes.xywh.cpu()
+                    if track_ids is not None:
+                        clses = results[0].boxes.cls.cpu()
+                        conf = results[0].boxes.conf.cpu()
+                        boxes = results[0].boxes.xywh.cpu()
+                        track_ids = track_ids.int().cpu()
+                    
+                        # Filter out non-tracked detections
+                        human_mask = clses == CLASS_TRACKED
+                        conf_mask = conf > CONF_THRESHOLD
+                        mask = human_mask & conf_mask
+                        clses = clses[mask]
+                        conf = conf[mask]
+                        boxes = boxes[mask]
+                        track_ids = track_ids[mask]
+
+                        # Plot Track Lines
+                        for cls, box, track_id in zip(clses, boxes, track_ids):
+                            name = model.names[cls.int().item()]
+
+                            x, y, w, h = box
+                            track = track_history[track_id]
+                            track.append((float(x), float(y)))  # x, y center point
+                            if len(track) > 30:  # retain 30 tracks for 30 frames
+                                track.pop(0)
+
+                            print(f"{name}_{track_id}, x: {x}, y: {y}")
+
+                            points = np.hstack(track).astype(np.int32).reshape((-1, 1, 2))
+                            cv2.polylines(annotated_frame, [points], isClosed=False, color=(230, 230, 230), thickness=10)
+
+                    cv2.imshow("YOLOv8 Inference", annotated_frame)
+
+                    if cv2.waitKey(1) & 0xFF == ord("q"):
+                        break
+
+                    # Largest Tracked Object
+                    box_areas = boxes[:, 2] * boxes[:, 3]
+                    if len(box_areas) == 0:
+                        movement_command = "STAY"
                     else:
-                        img_display.set_data(img_array)
+                        max_area_idx = box_areas.argmax(0)
+                        x_largest, y_largest, w_largest, h_largest = boxes[max_area_idx]
+                        print(f"x_largest: {x_largest}, y_largest: {y_largest}")
+                        if x_largest < 0.45 * img_array.shape[1]:
+                            movement_command = "MOVE_LEFT"
+                        elif x_largest > 0.55 * img_array.shape[1]:
+                            movement_command = "MOVE_RIGHT"
 
-                    plt.draw()
-                    plt.pause(0.01)  # Short pause to allow GUI updates
+                    # Send Movement command
+                    await websocket.send(movement_command)
+                    print(f"Sent command to ESP32: {movement_command}")
 
                 except Exception as e:
                     print(f"Error decoding image: {e}")
-
-                # Simulate object detection or image processing
-                print("Processing image...")
-                # (Run object detection or any other logic here)
-
-                # Send movement command based on processed image (example)
-                movement_command = "MOVE_LEFT"  # Example command
-                await websocket.send(movement_command)
-                print(f"Sent command to ESP32: {movement_command}")
             
             else:
-                # Handle text messages or other non-binary messages
+                # Other message types
                 print(f"Received message from ESP32: {message}")
 
     except websockets.exceptions.ConnectionClosed as e:
@@ -60,7 +108,6 @@ async def handle_client(websocket, path):
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        # This doesn't have to be reachable; it's just used to obtain the correct interface
         s.connect(("8.8.8.8", 80))  # Connect to Google's public DNS
         ip = s.getsockname()[0]  # Get the local IP address used for the connection
     except Exception as e:
@@ -71,7 +118,6 @@ def get_local_ip():
 
 server_ip = get_local_ip()
 print(f"Server IP address: {server_ip}")
-# Start the WebSocket server
 start_server = websockets.serve(handle_client, "0.0.0.0", 8765)
 
 # Run the WebSocket server forever
