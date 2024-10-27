@@ -16,12 +16,12 @@ import keyboard
 CLASS_TRACKED = 0  # 0 is the class ID for human
 CONF_THRESHOLD = 0.65  # Confidence threshold
 MIN_SPEED = 0
-MAX_SPEED = 5
+MAX_SPEED = 3
 
 ## State
 movement_mode = 0 # 0 is RC, 1 is CV
 movespeed = 0
-turn_command = "STAY"
+turn_command = "S"
 
 # Define the actions for each key
 actions = {
@@ -51,23 +51,24 @@ def reset_speed():
 
 def move_left():
     global turn_command
-    if turn_command == "STAY":
-        turn_command = "MOVE_LEFT"
-    elif turn_command == "MOVE_RIGHT":
-        turn_command = "STAY"
+    if turn_command == "S":
+        turn_command = "L"
+    elif turn_command == "R":
+        turn_command = "S"
     else:
-        turn_command = "MOVE_LEFT"
+        turn_command = "L"
 
 def move_right():
     global turn_command
-    if turn_command == "STAY":
-        turn_command = "MOVE_RIGHT"
-    elif turn_command == "MOVE_LEFT":
-        turn_command = "STAY"
+    if turn_command == "S":
+        turn_command = "R"
+    elif turn_command == "L":
+        turn_command = "S"
     else: 
-        turn_command = "MOVE_RIGHT"
+        turn_command = "R"
 
-model = YOLO("yolov8x-pose.pt") # n,s,m,l,x
+model = YOLO("yolov8l-pose.pt") # n,s,m,l,x
+model.to('cuda')
 
 async def handle_client(websocket, path):
     global movement_mode, movespeed, turn_command
@@ -83,9 +84,11 @@ async def handle_client(websocket, path):
 
                 try:
                     # Decode the JPEG image
-                    image = Image.open(io.BytesIO(message)) # Convert JPEG binary data to a PIL Image
-                    img_array = np.array(image)
+                    # image = Image.open(io.BytesIO(message)) # Convert JPEG binary data to a PIL Image
+                    # img_array = np.array(image)
                     
+                    img_array = cv2.imdecode(np.frombuffer(message, np.uint8), cv2.IMREAD_COLOR)
+
                     # Inference
                     results = model.track(img_array, persist=True, conf=CONF_THRESHOLD, classes=CLASS_TRACKED)
 
@@ -135,17 +138,17 @@ async def handle_client(websocket, path):
                     # Largest Tracked Object
                     if movement_mode == 1: # CV MODE
                         if len(eye_dist) == 0:
-                            turn_command = "STAY"
+                            turn_command = "S"
                         else:
                             max_eye_dist_idx = eye_dist.argmax(0)
                             x_largest, y_largest, conf_largest = kypts[max_eye_dist_idx][0]
                             print(f"x_largest: {x_largest}, y_largest: {y_largest}")
                             if x_largest < 0.45 * img_array.shape[1]:
-                                turn_command = "MOVE_LEFT"
+                                turn_command = "L"
                             elif x_largest > 0.55 * img_array.shape[1]:
-                                turn_command = "MOVE_RIGHT"
+                                turn_command = "R"
                             else:
-                                turn_command = "STAY"
+                                turn_command = "S"
 
                     for key, action in actions.items():
                         if keyboard.is_pressed(key):
