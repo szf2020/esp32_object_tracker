@@ -10,6 +10,7 @@ import cv2
 from collections import defaultdict
 from ultralytics import YOLO
 import keyboard
+import time
 
 
 ## Params
@@ -17,11 +18,13 @@ CLASS_TRACKED = 0  # 0 is the class ID for human
 CONF_THRESHOLD = 0.65  # Confidence threshold
 MIN_SPEED = 0
 MAX_SPEED = 3
+KEY_COOLDOWN = 0.5  # Cooldown period in seconds
 
 ## State
 movement_mode = 0 # 0 is RC, 1 is CV
 movespeed = 0
 turn_command = "S"
+last_key_press_time = {key: 0 for key in ['e', 'w', 's', 'h', 'a', 'd']}  # Initialize last key press times
 
 # Define the actions for each key
 actions = {
@@ -67,7 +70,7 @@ def move_right():
     else: 
         turn_command = "R"
 
-model = YOLO("yolov8l-pose.pt") # n,s,m,l,x
+model = YOLO("yolov8x-pose.pt") # n,s,m,l,x
 model.to('cuda')
 
 async def handle_client(websocket, path):
@@ -143,16 +146,16 @@ async def handle_client(websocket, path):
                             max_eye_dist_idx = eye_dist.argmax(0)
                             x_largest, y_largest, conf_largest = kypts[max_eye_dist_idx][0]
                             print(f"x_largest: {x_largest}, y_largest: {y_largest}")
-                            if x_largest < 0.45 * img_array.shape[1]:
+                            if x_largest < 0.40 * img_array.shape[1]:
                                 turn_command = "L"
-                            elif x_largest > 0.55 * img_array.shape[1]:
+                            elif x_largest > 0.60 * img_array.shape[1]:
                                 turn_command = "R"
                             else:
                                 turn_command = "S"
 
-                    for key, action in actions.items():
-                        if keyboard.is_pressed(key):
-                            action()
+                    # for key, action in actions.items():
+                    #     if keyboard.is_pressed(key):
+                    #         action()
 
                     # Send Movement command
                     print(f"movement_mode: {movement_mode}, movespeed: {movespeed}, turn_command: {turn_command}")
@@ -170,6 +173,14 @@ async def handle_client(websocket, path):
     except websockets.exceptions.ConnectionClosed as e:
         print(f"Connection with {client_ip} closed: {e}")
 
+async def check_keyboard():
+    while True:
+        current_time = time.time()
+        for key, action in actions.items():
+            if keyboard.is_pressed(key) and (current_time - last_key_press_time[key] > KEY_COOLDOWN):
+                action()
+                last_key_press_time[key] = current_time
+        await asyncio.sleep(0.1)  # Delay between checks
 
 def get_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -187,5 +198,7 @@ print(f"Server IP address: {server_ip}")
 start_server = websockets.serve(handle_client, "0.0.0.0", 8765)
 
 # Run the WebSocket server forever
-asyncio.get_event_loop().run_until_complete(start_server)
-asyncio.get_event_loop().run_forever()
+loop = asyncio.get_event_loop()
+loop.run_until_complete(start_server)
+loop.create_task(check_keyboard())
+loop.run_forever()
