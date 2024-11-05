@@ -83,7 +83,7 @@ async def handle_client(websocket, path):
     try:
         async for message in websocket:
             if isinstance(message, bytes):
-                print("Received image data from ESP32")
+                print("\nReceived image data from ESP32")
 
                 try:
                     # Decode the JPEG image

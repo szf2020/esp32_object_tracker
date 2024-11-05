@@ -16,10 +16,14 @@
 #define CAMERA_MODEL_AI_THINKER // Has PSRAM
 #include "camera_pins.h" // This must come after camera model has been selected
 
-const char* ssid     = "bruhmoment";     // input your wifi name
-const char* password = "D0gshit!";   // input your wifi passwords
-const char* server_ip = "192.168.188.198"; // input your laptop IP
+const char* ssid     = ".";     // input your wifi name
+const char* password = ".";   // input your wifi passwords
+const char* server_ip = "."; // input your laptop IP
 const int port = 8765; // input port used
+
+// Frequency for camera stream
+unsigned long lastCaptureTime = 0; // to store last capture time
+const unsigned long captureInterval = 100; // 100 ms interval
 
 // Declare GPIO pin numbers
 const int gpioPin1 = 12;
@@ -28,10 +32,6 @@ const int gpioPin3 = 14;
 const int gpioPin4 = 15;
 
 // Variables to store pin states (0: LOW, 1: HIGH)
-//int pin1State = 0;
-//int pin2State = 0;
-//int pin3State = 0;
-//int pin4State = 0;
 int pin1State = 1;
 int pin2State = 1;
 int pin3State = 1;
@@ -54,7 +54,7 @@ void onWebSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
     case WStype_TEXT:
       {
         String command = (char*)payload;
-        Serial.printf("Movement command: %s\n", command.c_str());
+        // Serial.printf("Movement command: %s\n", command.c_str());
         // Check if command has expected format
         if (command.length() == 2) {
           // Extract speed and direction from command
@@ -65,61 +65,36 @@ void onWebSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
 
           // Set pin1 and pin2 based on speed (0-3)
           switch (speed) {
-//            case '0':
-//              pin1State = 0;
-//              pin2State = 0;
-//              break;
-//            case '1':
-//              pin1State = 1;
-//              pin2State = 0;
-//              break;
-//            case '2':
-//              pin1State = 0;
-//              pin2State = 1;
-//              break;
-//            case '3':
-//              pin1State = 1;
-//              pin2State = 1;
-//              break;
-                        case '0':
-                          pin1State = 1;
-                          pin2State = 1;
-                          break;
-                        case '1':
-                          pin1State = 0;
-                          pin2State = 1;
-                          break;
-                        case '2':
-                          pin1State = 1;
-                          pin2State = 0;
-                          break;
-                        case '3':
-                          pin1State = 0;
-                          pin2State = 0;
-                          break;
+            case '0':
+              pin1State = 1;
+              pin2State = 1;
+              break;
+            case '1':
+              pin1State = 0;
+              pin2State = 1;
+              break;
+            case '2':
+              pin1State = 1;
+              pin2State = 0;
+              break;
+            case '3':
+              pin1State = 0;
+              pin2State = 0;
+              break;
             default:
               Serial.println("Invalid speed value.");
           }
 
           // Set pin3 and pin4 based on direction (L, S, R)
-//          if (direction == 'L') {
-//            pin3State = 1;
-//            pin4State = 0;
-//          } else if (direction == 'R') {
-//            pin3State = 0;
-//            pin4State = 1;
-//          } else if (direction == 'S') {
-//            pin3State = 0;
-//            pin4State = 0;
-                      if (direction == 'L') {
-                        pin3State = 0;
-                        pin4State = 1;
-                      } else if (direction == 'R') {
-                        pin3State = 1;
-                        pin4State = 0;
-                      } else if (direction == 'S') {
-                        pin3State = 1;
-                        pin4State = 1;
+            if (direction == 'L') {
+              pin3State = 0;
+              pin4State = 1;
+            } else if (direction == 'R') {
+              pin3State = 1;
+              pin4State = 0;
+            } else if (direction == 'S') {
+              pin3State = 1;
+              pin4State = 1;
           } else {
             Serial.println("Invalid direction value.");
           }
@@ -213,20 +188,23 @@ void setup() {
   sensor_t *s = esp_camera_sensor_get();
 
   // For OV2640, mirror the image and adjust color settings
-  s->set_saturation(s, 1);  // Adjust saturation if colors seem off
-  s->set_brightness(s, 0);  // Set brightness to neutral (adjust as needed)
+  if (s->id.PID == OV2640_PID) {
+    s->set_saturation(s, -1);  // Adjust saturation if colors seem off
+    s->set_brightness(s, 0);  // Set brightness to neutral (adjust as needed)
+  }
 
-  //  // initial sensors are flipped vertically and colors are a bit saturated
-  //  if (s->id.PID == OV3660_PID) {
-  //    s->set_vflip(s, 1);        // flip it back
-  //    s->set_brightness(s, 1);   // up the brightness just a bit
-  //    s->set_saturation(s, -2);  // lower the saturation
-  //  }
-  //
+  // initial sensors are flipped vertically and colors are a bit saturated
+  if (s->id.PID == OV3660_PID) {
+    s->set_vflip(s, 1);        // flip it back
+    s->set_brightness(s, 1);   // up the brightness just a bit
+    s->set_saturation(s, -2);  // lower the saturation
+  }
+  
 
   // drop down frame size for higher initial frame rate
   if (config.pixel_format == PIXFORMAT_JPEG) {
-    s->set_framesize(s, FRAMESIZE_QVGA);
+    // s->set_framesize(s, FRAMESIZE_QVGA);
+    s->set_framesize(s, FRAMESIZE_VGA);
   }
 
   //#if defined(CAMERA_MODEL_M5STACK_WIDE) || defined(CAMERA_MODEL_M5STACK_ESP32CAM)
@@ -272,22 +250,37 @@ void loop() {
   // Look for and handle WebSocket data
   webSocket.loop();
 
+  if (millis() - lastCaptureTime >= captureInterval) {
+    lastCaptureTime = millis();
+    
+    // Capture image from cam
+    camera_fb_t* fb = esp_camera_fb_get(); // Capture an image
+    if (fb) {
+      size_t fbsize = fb->len; // Get the image size
+      Serial.printf("Captured image with size: %d bytes\n", fbsize);
+      webSocket.sendBIN(fb->buf, fbsize); // send image data over WebSocket
+      esp_camera_fb_return(fb); // return frame buffer to free up memory
+    } else {
+      Serial.println("Camera capture failed");
+    }
+  }
+
   // Update GPIO pins based on pin states
   digitalWrite(gpioPin1, pin1State);
   digitalWrite(gpioPin2, pin2State);
   digitalWrite(gpioPin3, pin3State);
   digitalWrite(gpioPin4, pin4State);
 
-  // Capture image from cam
-  camera_fb_t* fb = esp_camera_fb_get(); // Capture an image
-  if (fb) {
-    size_t fbsize = fb->len; // Get the image size
-    Serial.printf("Captured image with size: %d bytes\n", fbsize);
-    webSocket.sendBIN(fb->buf, fbsize); // send image data over WebSocket
-    esp_camera_fb_return(fb); // return frame buffer to free up memory
-  } else {
-    Serial.println("Camera capture failed");
-  }
-
-  delay(50); // delay in milliseconds
+//  // Capture image from cam
+//  camera_fb_t* fb = esp_camera_fb_get(); // Capture an image
+//  if (fb) {
+//    size_t fbsize = fb->len; // Get the image size
+//    Serial.printf("Captured image with size: %d bytes\n", fbsize);
+//    webSocket.sendBIN(fb->buf, fbsize); // send image data over WebSocket
+//    esp_camera_fb_return(fb); // return frame buffer to free up memory
+//  } else {
+//    Serial.println("Camera capture failed");
+//  }
+//
+//  delay(100); // delay in milliseconds
 }
